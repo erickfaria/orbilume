@@ -28,7 +28,7 @@ public final class OrbilumeTest {
         Bounds bounds = new Bounds(48.1, 16.35, 48.3, 16.5);
         LocalDate start = LocalDate.parse("2026-09-01");
         LocalDate end = LocalDate.parse("2026-09-30");
-        URI request = Copernicus.searchUri(bounds, start, end, 20);
+        URI request = Copernicus.searchUri(bounds, start, end, 20, Copernicus.Provider.EOPF);
         check(request.getQuery().contains("bbox=16.3500000,48.1000000,16.5000000,48.3000000"),
                 "STAC bbox uses longitude, latitude order");
         check(request.getQuery().contains("limit=20") && request.getQuery().contains("datetime=2026-09-01"),
@@ -53,7 +53,7 @@ public final class OrbilumeTest {
                 check(true, "Invalid AOI rejected");
             }
         }
-        var scenes = new Copernicus(uri -> FIXTURE).search(bounds, start, end, 20);
+        var scenes = new Copernicus(uri -> FIXTURE).search(bounds, start, end, 20, Copernicus.Provider.EOPF);
         check(scenes.size() == 1 && scenes.get(0).clouds() == 12.5
                 && Copernicus.parse(FIXTURE).get(1).clouds() == null,
                 "Cloud filter excludes unknown coverage and enforces threshold locally");
@@ -67,7 +67,7 @@ public final class OrbilumeTest {
         }
         expectIOException(() -> new Copernicus(uri -> {
             throw new IOException("offline");
-        }).search(bounds, start, end, 30), "Network errors propagate to the dialog");
+        }).search(bounds, start, end, 30, Copernicus.Provider.EOPF), "Network errors propagate to the dialog");
         var imagery = OrbilumePlugin.imageryInfo(scenes.get(0), Copernicus.Composite.NATURAL);
         check(imagery.getImageryType() == org.openstreetmap.josm.data.imagery.ImageryInfo.ImageryType.TMS,
                 "JOSM selects a native TMS layer");
@@ -89,14 +89,75 @@ public final class OrbilumeTest {
                     && jar.getEntry(plugin.replace('.', '/') + ".class") != null
                     && jar.getEntry("LICENSE") != null, "Installable JOSM plugin package");
         }
+        testTiffPredictor();
+        check(EarthRaster.stretch(1000, .0001, -.1) == 0
+                && EarthRaster.stretch(5500, .0001, -.1) == 255, "Sentinel-2 reflectance scale and offset");
+        Bounds brazil = Copernicus.parseAoi("-45.6389308,-20.1919466,-45.5574714,-20.1443104");
+        URI earth = Copernicus.searchUri(brazil, start, end, 20, Copernicus.Provider.EARTH_SEARCH);
+        check("earth-search.aws.element84.com".equals(earth.getHost())
+                && earth.getQuery().contains("collections=sentinel-2-c1-l2a"), "Earth Search collection");
+        String scene = "S2B_T23KMT_20260927T131241_L2A";
+        String path = "/sentinel-2-c1-l2a/23/K/MT/2026/9/" + scene + "/TCI.tif";
+        String host = "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com";
+        check(EarthRaster.allowed(URI.create(host + path), scene, "TCI")
+                && !EarthRaster.allowed(URI.create(host + path + "?extra=1"), scene, "TCI")
+                && !EarthRaster.allowed(URI.create("https://example.org" + path), scene, "TCI")
+                && !EarthRaster.allowed(URI.create(host + "/x/.." + path), scene, "TCI"),
+                "Only expected public Earth Search assets are accepted");
+        if (args.length == 1 && args[0].equals("--live-earth")) {
+            var brazilScenes = new Copernicus().search(brazil, LocalDate.parse("2026-09-15"),
+                    LocalDate.parse("2026-11-14"), 30, Copernicus.Provider.EARTH_SEARCH);
+            check(!brazilScenes.isEmpty(), "Earth Search returns scenes for the Brazil AOI");
+            for (var composite : Copernicus.Composite.values()) {
+                Bounds pilot = Copernicus.parseAoi("-45.6069,-20.1737,-45.5985,-20.1674");
+                var crop = EarthRaster.load(brazilScenes.get(0), composite, pilot);
+                var pixels = crop.pixels();
+                check(pixels.getWidth() > 20 && pixels.getHeight() > 20
+                        && (pixels.getRGB(pixels.getWidth() / 2, pixels.getHeight() / 2) >>> 24) != 0,
+                        "Real georeferenced crop for " + composite);
+                ImageIO.write(pixels, "PNG", new java.io.File("build/earth-" + composite.name() + ".png"));
+            }
+        }
         if (args.length == 1 && args[0].equals("--live")) {
             live(bounds, start, end);
         }
     }
 
+    private static void testTiffPredictor() throws IOException {
+        int[][] tags = {{256, 16}, {257, 16}, {258, 16}, {259, 8}, {262, 1}, {277, 1},
+                {317, 2}, {322, 16}, {323, 16}, {324, 0}, {325, 0}};
+        var samples = java.nio.ByteBuffer.allocate(512).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (int y = 0; y < 16; y++) {
+            for (int x = 0; x < 16; x++) {
+                samples.putShort((short) (x == 0 ? 1000 + y : 10));
+            }
+        }
+        var encoded = new java.io.ByteArrayOutputStream();
+        try (var deflate = new java.util.zip.DeflaterOutputStream(encoded)) {
+            deflate.write(samples.array());
+        }
+        int tileOffset = 8 + 2 + tags.length * 12 + 4;
+        var file = java.nio.ByteBuffer.allocate(tileOffset + encoded.size()).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        file.putShort((short) 0x4949).putShort((short) 42).putInt(8).putShort((short) tags.length);
+        for (int[] tag : tags) {
+            boolean offset = tag[0] == 324;
+            boolean size = tag[0] == 325;
+            file.putShort((short) tag[0]).putShort((short) (offset || size ? 4 : 3)).putInt(1)
+                    .putInt(offset ? tileOffset : size ? encoded.size() : tag[1]);
+        }
+        file.putInt(0).put(encoded.toByteArray());
+        try (var input = new javax.imageio.stream.MemoryCacheImageInputStream(
+                new java.io.ByteArrayInputStream(file.array()))) {
+            var asset = new EarthRaster.Asset(null, 16, 16, 0, 0, 10, .0001, -.1);
+            var raster = EarthRaster.readBand(input, asset, new java.awt.Rectangle(4, 3, 2, 2));
+            check(raster.getSample(0, 0, 0) == 1043 && raster.getSample(1, 1, 0) == 1054,
+                    "Cropped 16-bit TIFF reverses the horizontal predictor");
+        }
+    }
+
     private static void live(Bounds bounds, LocalDate start, LocalDate end) throws Exception {
         var catalog = new Copernicus();
-        var scenes = catalog.search(bounds, start, end, 30);
+        var scenes = catalog.search(bounds, start, end, 30, Copernicus.Provider.EOPF);
         check(!scenes.isEmpty(), "Live STAC search");
         IOException lastFailure = null;
         for (var scene : scenes.stream().limit(3).toList()) {

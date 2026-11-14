@@ -18,6 +18,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import org.openstreetmap.josm.data.Bounds;
 
@@ -25,6 +26,26 @@ final class Copernicus {
     private static final String HOST = "https://api.explorer.eopf.copernicus.eu";
     private static final String COLLECTION = "sentinel-2-l2a";
     private static final int LIMIT = 20;
+
+    enum Provider {
+        EARTH_SEARCH("Earth Search (Element 84)", "https://earth-search.aws.element84.com/v1/search", "sentinel-2-c1-l2a"),
+        EOPF("Copernicus EOPF Explorer", HOST + "/stac/search", COLLECTION);
+
+        final String label;
+        final String endpoint;
+        final String collection;
+
+        Provider(String label, String endpoint, String collection) {
+            this.label = label;
+            this.endpoint = endpoint;
+            this.collection = collection;
+        }
+
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
 
     enum Composite {
         NATURAL("Natural color", "b04,b03,b02", "0,1"),
@@ -47,7 +68,8 @@ final class Copernicus {
         }
     }
 
-    record Scene(String id, Instant acquired, String platform, Double clouds) {
+    record Scene(String id, Instant acquired, String platform, Double clouds, Provider provider,
+                 String crs, Map<String, EarthRaster.Asset> assets) {
         String attribution() {
             return "Contains modified Copernicus Sentinel data " + acquired.atOffset(ZoneOffset.UTC).getYear();
         }
@@ -77,12 +99,12 @@ final class Copernicus {
             try {
                 int status = connection.getResponseCode();
                 if (status != 200) {
-                    throw new IOException("Copernicus catalog returned HTTP " + status + ".");
+                    throw new IOException("Imagery catalog returned HTTP " + status + ".");
                 }
                 try (InputStream body = connection.getInputStream()) {
                     byte[] bytes = body.readNBytes(4_000_001);
                     if (bytes.length > 4_000_000) {
-                        throw new IOException("Copernicus catalog response is too large.");
+                        throw new IOException("Imagery catalog response is too large.");
                     }
                     return new String(bytes, StandardCharsets.UTF_8);
                 }
@@ -129,7 +151,7 @@ final class Copernicus {
         return bounds;
     }
 
-    static URI searchUri(Bounds bounds, LocalDate start, LocalDate end, int maxCloud) {
+    static URI searchUri(Bounds bounds, LocalDate start, LocalDate end, int maxCloud, Provider provider) {
         if (end.isBefore(start)) {
             throw new IllegalArgumentException("End date must be on or after the start date.");
         }
@@ -138,14 +160,14 @@ final class Copernicus {
         }
         String interval = start + "T00:00:00Z/" + end + "T23:59:59.999999999Z";
         String query = "{\"eo:cloud_cover\":{\"lte\":" + maxCloud + "}}";
-        return URI.create(HOST + "/stac/search?collections=" + COLLECTION + "&bbox=" + bbox(bounds)
+        return URI.create(provider.endpoint + "?collections=" + provider.collection + "&bbox=" + bbox(bounds)
                 + "&datetime=" + encode(interval) + "&limit=" + LIMIT
                 + "&query=" + encode(query) + "&sortby=" + encode("+properties.eo:cloud_cover"));
     }
 
-    List<Scene> search(Bounds bounds, LocalDate start, LocalDate end, int maxCloud)
+    List<Scene> search(Bounds bounds, LocalDate start, LocalDate end, int maxCloud, Provider provider)
             throws IOException, InterruptedException {
-        return parse(fetch.get(searchUri(bounds, start, end, maxCloud))).stream()
+        return parse(fetch.get(searchUri(bounds, start, end, maxCloud, provider)), provider).stream()
                 .filter(scene -> scene.clouds() != null && scene.clouds() <= maxCloud)
                 .sorted(Comparator.comparing(Scene::clouds)
                         .thenComparing(Scene::acquired, Comparator.reverseOrder()).thenComparing(Scene::id))
@@ -153,6 +175,10 @@ final class Copernicus {
     }
 
     static List<Scene> parse(String response) throws IOException {
+        return parse(response, Provider.EOPF);
+    }
+
+    static List<Scene> parse(String response, Provider provider) throws IOException {
         try (var reader = Json.createReader(new StringReader(response))) {
             JsonObject collection = reader.readObject();
             JsonArray features = collection.getJsonArray("features");
@@ -176,18 +202,31 @@ final class Copernicus {
                 if (clouds != null && !(clouds >= 0 && clouds <= 100)) {
                     clouds = null;
                 }
-                scenes.add(new Scene(id, acquired, platform, clouds));
+                if (provider == Provider.EARTH_SEARCH) {
+                    String crs = properties.getString("proj:code", "");
+                    if (crs.isEmpty() && properties.get("proj:epsg") instanceof JsonNumber epsg) {
+                        crs = "EPSG:" + epsg.intValueExact();
+                    }
+                    if (crs.matches("EPSG:32[67](0[1-9]|[1-5][0-9]|60)")) {
+                        var assets = EarthRaster.assets(item.getJsonObject("assets"), id);
+                        if (assets.containsKey("visual")) {
+                            scenes.add(new Scene(id, acquired, platform, clouds, provider, crs, assets));
+                        }
+                    }
+                } else {
+                    scenes.add(new Scene(id, acquired, platform, clouds, provider, "", Map.of()));
+                }
             }
             return List.copyOf(scenes);
         } catch (RuntimeException e) {
-            throw new IOException("Copernicus returned an invalid STAC response.", e);
+            throw new IOException("Imagery catalog returned an invalid STAC response.", e);
         } catch (LinkageError e) {
             // Debian r19369 omits the Parsson error-message resource bundle.
             if (e instanceof ExceptionInInitializerError
                     && e.getCause() instanceof java.util.MissingResourceException
                     || e instanceof NoClassDefFoundError && e.getMessage() != null
                     && e.getMessage().contains("org.eclipse.parsson.JsonMessages")) {
-                throw new IOException("Copernicus returned an invalid STAC response.", e);
+                throw new IOException("Imagery catalog returned an invalid STAC response.", e);
             }
             throw e;
         }

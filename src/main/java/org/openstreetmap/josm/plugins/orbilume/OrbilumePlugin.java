@@ -28,6 +28,7 @@ import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import org.openstreetmap.josm.data.Bounds;
 import org.openstreetmap.josm.data.osm.BBox;
+import org.openstreetmap.josm.data.projection.ProjectionRegistry;
 import org.openstreetmap.josm.data.imagery.ImageryInfo;
 import org.openstreetmap.josm.data.imagery.ImageryInfo.ImageryType;
 import org.openstreetmap.josm.gui.MainApplication;
@@ -62,14 +63,16 @@ public final class OrbilumePlugin extends Plugin {
         private final JTextField start = new JTextField(LocalDate.now(ZoneOffset.UTC).minusDays(30).toString());
         private final JTextField end = new JTextField(LocalDate.now(ZoneOffset.UTC).toString());
         private final JTextField aoi = new JTextField(38);
+        private final JComboBox<Copernicus.Provider> provider = new JComboBox<>(Copernicus.Provider.values());
         private final JComboBox<Copernicus.Composite> composite = new JComboBox<>(Copernicus.Composite.values());
         private final JSpinner clouds = new JSpinner(new SpinnerNumberModel(30, 0, 100, 1));
         private final DefaultListModel<Copernicus.Scene> results = new DefaultListModel<>();
         private final JList<Copernicus.Scene> scenes = new JList<>(results);
         private final JButton search = new JButton("Search");
         private final JButton load = new JButton("Load imagery");
-        private final JLabel status = new JLabel("Search sends the displayed AOI to Copernicus EOPF Explorer.");
+        private final JLabel status = new JLabel("Search sends the displayed AOI to the selected provider.");
         private SwingWorker<List<Copernicus.Scene>, Void> worker;
+        private SwingWorker<EarthRaster.Image, Void> cropWorker;
         private Bounds resultAoi;
 
         SceneDialog() {
@@ -85,6 +88,8 @@ public final class OrbilumePlugin extends Plugin {
             filters.add(end);
             filters.add(new JLabel("Maximum scene cloud cover (%)"));
             filters.add(clouds);
+            filters.add(new JLabel("Imagery provider"));
+            filters.add(provider);
             filters.add(new JLabel("Imagery composition"));
             filters.add(composite);
 
@@ -123,6 +128,10 @@ public final class OrbilumePlugin extends Plugin {
             body.add(footer, BorderLayout.SOUTH);
 
             load.setEnabled(false);
+            provider.addActionListener(event -> {
+                results.clear();
+                status.setText("Search sends the displayed AOI to the selected provider.");
+            });
             scenes.addListSelectionListener(event -> load.setEnabled(!scenes.isSelectionEmpty()));
             search.addActionListener(event -> search());
             load.addActionListener(event -> load());
@@ -161,7 +170,7 @@ public final class OrbilumePlugin extends Plugin {
         private void setAoi(Bounds bounds) {
             try {
                 aoi.setText(Copernicus.bbox(bounds));
-                status.setText("Search sends the displayed AOI to Copernicus EOPF Explorer.");
+                status.setText("Search sends the displayed AOI to the selected provider.");
             } catch (IllegalArgumentException e) {
                 status.setText(e.getMessage());
             }
@@ -172,13 +181,14 @@ public final class OrbilumePlugin extends Plugin {
             LocalDate from;
             LocalDate to;
             int maxCloud;
+            var selectedProvider = (Copernicus.Provider) provider.getSelectedItem();
             try {
                 bounds = Copernicus.parseAoi(aoi.getText());
                 from = LocalDate.parse(start.getText().trim());
                 to = LocalDate.parse(end.getText().trim());
                 clouds.commitEdit();
                 maxCloud = (Integer) clouds.getValue();
-                Copernicus.searchUri(bounds, from, to, maxCloud);
+                Copernicus.searchUri(bounds, from, to, maxCloud, selectedProvider);
             } catch (DateTimeParseException e) {
                 status.setText("Enter dates in YYYY-MM-DD format.");
                 return;
@@ -191,11 +201,12 @@ public final class OrbilumePlugin extends Plugin {
             }
             results.clear();
             search.setEnabled(false);
-            status.setText("Searching Copernicus…");
+            provider.setEnabled(false);
+            status.setText("Searching " + selectedProvider + "…");
             worker = new SwingWorker<>() {
                 @Override
                 protected List<Copernicus.Scene> doInBackground() throws Exception {
-                    return catalog.search(bounds, from, to, maxCloud);
+                    return catalog.search(bounds, from, to, maxCloud, selectedProvider);
                 }
 
                 @Override
@@ -204,11 +215,12 @@ public final class OrbilumePlugin extends Plugin {
                         return;
                     }
                     search.setEnabled(true);
+                    provider.setEnabled(true);
                     try {
                         List<Copernicus.Scene> found = get();
                         resultAoi = bounds;
                         results.addAll(found);
-                        status.setText(found.isEmpty() ? "No scenes matched the AOI, dates and cloud limit."
+                        status.setText(found.isEmpty() ? "No scenes matched this AOI in " + selectedProvider + "."
                                 : found.size() + " scenes • Copernicus Sentinel-2 L2A");
                         if (!found.isEmpty()) {
                             scenes.setSelectedIndex(0);
@@ -219,8 +231,8 @@ public final class OrbilumePlugin extends Plugin {
                     } catch (ExecutionException e) {
                         Logging.warn(e.getCause());
                         String message = e.getCause().getMessage();
-                        status.setText(message != null && message.startsWith("Copernicus")
-                                ? message : "Unable to reach Copernicus. Check the network and retry.");
+                        status.setText(message != null && message.startsWith("Imagery catalog")
+                                ? message : "Unable to reach the imagery catalog. Check the network and retry.");
                     }
                 }
             };
@@ -233,8 +245,13 @@ public final class OrbilumePlugin extends Plugin {
                 status.setText("Select a scene first.");
                 return;
             }
+            var selection = (Copernicus.Composite) composite.getSelectedItem();
+            if (scene.provider() == Copernicus.Provider.EARTH_SEARCH) {
+                loadCrop(scene, selection, resultAoi);
+                return;
+            }
             try {
-                ImageryInfo info = imageryInfo(scene, (Copernicus.Composite) composite.getSelectedItem());
+                ImageryInfo info = imageryInfo(scene, selection);
                 var layers = MainApplication.getLayerManager();
                 boolean alreadyLoaded = layers.getLayersOfType(ImageryLayer.class).stream()
                         .anyMatch(layer -> info.getUrl().equals(layer.getInfo().getUrl()));
@@ -243,12 +260,7 @@ public final class OrbilumePlugin extends Plugin {
                     return;
                 }
                 layers.addLayer(ImageryLayer.create(info));
-                Bounds loadedAoi = resultAoi;
-                SwingUtilities.invokeLater(() -> {
-                    if (loadedAoi != null && MainApplication.isDisplayingMapView()) {
-                        MainApplication.getMap().mapView.zoomTo(loadedAoi);
-                    }
-                });
+                zoomTo(resultAoi);
                 status.setText("Imagery layer added. Check the layer for tile errors.");
             } catch (RuntimeException e) {
                 Logging.warn(e);
@@ -256,10 +268,66 @@ public final class OrbilumePlugin extends Plugin {
             }
         }
 
+        private void loadCrop(Copernicus.Scene scene, Copernicus.Composite selection, Bounds bounds) {
+            if (!"EPSG:3857".equals(ProjectionRegistry.getProjection().toCode())) {
+                status.setText("Set the JOSM projection to Web Mercator (EPSG:3857) to load the crop.");
+                return;
+            }
+            search.setEnabled(false);
+            provider.setEnabled(false);
+            load.setEnabled(false);
+            scenes.setEnabled(false);
+            status.setText("Loading imagery for the searched AOI…");
+            cropWorker = new SwingWorker<>() {
+                @Override
+                protected EarthRaster.Image doInBackground() throws Exception {
+                    return EarthRaster.load(scene, selection, bounds);
+                }
+
+                @Override
+                protected void done() {
+                    if (isCancelled() || !isDisplayable()) {
+                        return;
+                    }
+                    search.setEnabled(true);
+                    provider.setEnabled(true);
+                    scenes.setEnabled(true);
+                    load.setEnabled(!scenes.isSelectionEmpty());
+                    try {
+                        MainApplication.getLayerManager().addLayer(new EarthLayer(get(), scene, selection));
+                        zoomTo(bounds);
+                        status.setText("Imagery added • " + scene.attribution() + " • Earth Search");
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        status.setText("Imagery load interrupted.");
+                    } catch (ExecutionException e) {
+                        Logging.warn(e.getCause());
+                        status.setText(e.getCause() instanceof java.io.IOException
+                                ? e.getCause().getMessage() : "Unable to load this image crop.");
+                    } catch (RuntimeException e) {
+                        Logging.warn(e);
+                        status.setText("Unable to open the image crop as a JOSM layer.");
+                    }
+                }
+            };
+            cropWorker.execute();
+        }
+
+        private static void zoomTo(Bounds bounds) {
+            SwingUtilities.invokeLater(() -> {
+                if (bounds != null && MainApplication.isDisplayingMapView()) {
+                    MainApplication.getMap().mapView.zoomTo(bounds);
+                }
+            });
+        }
+
         @Override
         public void dispose() {
             if (worker != null) {
                 worker.cancel(true);
+            }
+            if (cropWorker != null) {
+                cropWorker.cancel(true);
             }
             super.dispose();
         }
