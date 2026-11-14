@@ -23,9 +23,19 @@ mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/JOSM/plugins"
 cp -i build/orbilume.jar "${XDG_DATA_HOME:-$HOME/.local/share}/JOSM/plugins/"
 ```
 
-Restart JOSM. In **Preferences → Plugins**, enable **orbilume**, apply the change, and restart if prompted. Open a map layer and zoom to the area of interest. Select **Imagery → Orbilume**, set the date and cloud filters, and click **Search**. Select a scene and click **Load imagery**. Remove it through the JOSM Layers panel.
+Restart JOSM. In **Preferences → Plugins**, enable **orbilume**, apply the change, and restart if prompted. Open **Imagery → Orbilume**.
 
-The cloud filter is applied to the first 20 catalog results. Scenes with missing cloud metadata are marked unknown and included. Cloud coverage applies to the full scene. The Raster API uses the explicit B04, B03 and B02 reflectance asset selection. During testing, the example using `variables` returned HTTP 422, and the sample TileJSON route returned HTTP 400. The direct Web Mercator RGB tile and reflectance info routes responded successfully. [EOPF API documentation](https://explorer.eopf.copernicus.eu/software-services/developer-resources/)
+1. Click **Use map view** to copy the viewport, or select one or more map objects and click **Use selection** to copy their bounding box. You can also paste a bounding box in west, south, east, north order using decimal degrees.
+2. Set the dates and maximum scene cloud cover, then click **Search**. Copernicus filters the catalog before returning up to 20 scenes, with the least cloudy first. Scenes without valid cloud metadata are excluded.
+3. Select a scene and choose **Natural color** (B04/B03/B02), **Vegetation** (B08/B04/B03), or **Soil and vegetation** (B12/B8A/B04). Click **Load imagery** to open a native layer and zoom to the searched AOI. Remove it through the Layers panel.
+
+Cloud cover is reported for the whole scene. A low percentage can still leave cloud over the AOI. The scene cloud filter does not mask individual pixels. The provider returned HTTP 400 for the SCL asset during verification. A loaded layer displays the selected scene wherever JOSM requests visible tiles, including beyond the search box.
+
+## Network and data handling
+
+Search sends the displayed bounding box, dates, and cloud threshold to Copernicus. Selection uses only the enclosing rectangle. The plugin does not send the selected objects, IDs, or tags. Search uses fixed HTTPS endpoints, rejects catalog redirects, limits the response size and result count, and validates scene IDs before building tile URLs. JOSM handles visible tile requests and uses its normal imagery cache and proxy settings. Tile coordinates allow the provider to infer the viewed area.
+
+The Raster API uses explicit reflectance asset band selection. The direct Web Mercator PNG route worked for all three compositions. An older example using `variables` returned HTTP 422, and the sample TileJSON route returned HTTP 400. [EOPF API documentation](https://explorer.eopf.copernicus.eu/software-services/developer-resources/)
 
 ## License
 

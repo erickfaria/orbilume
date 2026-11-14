@@ -10,11 +10,8 @@ import java.io.InputStream;
 import java.io.StringReader;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import javax.net.ssl.HttpsURLConnection;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -28,6 +25,27 @@ final class Copernicus {
     private static final String HOST = "https://api.explorer.eopf.copernicus.eu";
     private static final String COLLECTION = "sentinel-2-l2a";
     private static final int LIMIT = 20;
+
+    enum Composite {
+        NATURAL("Natural color", "b04,b03,b02", "0,1"),
+        VEGETATION("Vegetation (near infrared)", "b08,b04,b03", "0,0.45"),
+        SWIR("Soil and vegetation (SWIR)", "b12,b8a,b04", "0,0.45");
+
+        private final String label;
+        private final String bands;
+        private final String range;
+
+        Composite(String label, String bands, String range) {
+            this.label = label;
+            this.bands = bands;
+            this.range = range;
+        }
+
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
 
     record Scene(String id, Instant acquired, String platform, Double clouds) {
         String attribution() {
@@ -50,20 +68,26 @@ final class Copernicus {
     private final Fetch fetch;
 
     Copernicus() {
-        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
         fetch = uri -> {
-            HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(20))
-                    .header("Accept", "application/geo+json, application/json").GET().build();
-            var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
-            try (InputStream body = response.body()) {
-                if (response.statusCode() != 200) {
-                    throw new IOException("Copernicus catalog returned HTTP " + response.statusCode() + ".");
+            HttpsURLConnection connection = (HttpsURLConnection) uri.toURL().openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(15000);
+            connection.setRequestProperty("Accept", "application/geo+json, application/json");
+            try {
+                int status = connection.getResponseCode();
+                if (status != 200) {
+                    throw new IOException("Copernicus catalog returned HTTP " + status + ".");
                 }
-                byte[] bytes = body.readNBytes(4_000_001);
-                if (bytes.length > 4_000_000) {
-                    throw new IOException("Copernicus catalog response is too large.");
+                try (InputStream body = connection.getInputStream()) {
+                    byte[] bytes = body.readNBytes(4_000_001);
+                    if (bytes.length > 4_000_000) {
+                        throw new IOException("Copernicus catalog response is too large.");
+                    }
+                    return new String(bytes, StandardCharsets.UTF_8);
                 }
-                return new String(bytes, StandardCharsets.UTF_8);
+            } finally {
+                connection.disconnect();
             }
         };
     }
@@ -84,19 +108,47 @@ final class Copernicus {
         return String.format(Locale.ROOT, "%.7f,%.7f,%.7f,%.7f", west, south, east, north);
     }
 
-    static URI searchUri(Bounds bounds, LocalDate start, LocalDate end) {
+    static Bounds parseAoi(String text) {
+        if (text.length() > 128) {
+            throw new IllegalArgumentException("Enter west, south, east, north in decimal degrees.");
+        }
+        String[] parts = text.strip().split(",", -1);
+        if (parts.length != 4) {
+            throw new IllegalArgumentException("Enter west, south, east, north in decimal degrees.");
+        }
+        double[] values = new double[4];
+        for (int i = 0; i < values.length; i++) {
+            String part = parts[i].strip();
+            if (!part.matches("[+-]?[0-9]{1,3}(\\.[0-9]{1,12})?")) {
+                throw new IllegalArgumentException("Use decimal degrees with a period and comma separators.");
+            }
+            values[i] = Double.parseDouble(part);
+        }
+        Bounds bounds = new Bounds(values[1], values[0], values[3], values[2], false);
+        bbox(bounds);
+        return bounds;
+    }
+
+    static URI searchUri(Bounds bounds, LocalDate start, LocalDate end, int maxCloud) {
         if (end.isBefore(start)) {
             throw new IllegalArgumentException("End date must be on or after the start date.");
         }
+        if (maxCloud < 0 || maxCloud > 100) {
+            throw new IllegalArgumentException("Cloud cover must be from 0 to 100.");
+        }
         String interval = start + "T00:00:00Z/" + end + "T23:59:59.999999999Z";
+        String query = "{\"eo:cloud_cover\":{\"lte\":" + maxCloud + "}}";
         return URI.create(HOST + "/stac/search?collections=" + COLLECTION + "&bbox=" + bbox(bounds)
-                + "&datetime=" + URLEncoder.encode(interval, StandardCharsets.UTF_8) + "&limit=" + LIMIT);
+                + "&datetime=" + encode(interval) + "&limit=" + LIMIT
+                + "&query=" + encode(query) + "&sortby=" + encode("+properties.eo:cloud_cover"));
     }
 
-    List<Scene> search(URI uri, int maxCloud) throws IOException, InterruptedException {
-        return parse(fetch.get(uri)).stream()
-                .filter(scene -> scene.clouds() == null || scene.clouds() <= maxCloud)
-                .sorted(Comparator.comparing(Scene::acquired).reversed().thenComparing(Scene::id))
+    List<Scene> search(Bounds bounds, LocalDate start, LocalDate end, int maxCloud)
+            throws IOException, InterruptedException {
+        return parse(fetch.get(searchUri(bounds, start, end, maxCloud))).stream()
+                .filter(scene -> scene.clouds() != null && scene.clouds() <= maxCloud)
+                .sorted(Comparator.comparing(Scene::clouds)
+                        .thenComparing(Scene::acquired, Comparator.reverseOrder()).thenComparing(Scene::id))
                 .toList();
     }
 
@@ -104,7 +156,7 @@ final class Copernicus {
         try (var reader = Json.createReader(new StringReader(response))) {
             JsonObject collection = reader.readObject();
             JsonArray features = collection.getJsonArray("features");
-            if (!"FeatureCollection".equals(collection.getString("type", "")) || features == null) {
+            if (!"FeatureCollection".equals(collection.getString("type", "")) || features == null || features.size() > LIMIT) {
                 throw new IllegalArgumentException("Expected a STAC FeatureCollection.");
             }
             List<Scene> scenes = new ArrayList<>();
@@ -116,7 +168,9 @@ final class Copernicus {
                 }
                 JsonObject properties = item.getJsonObject("properties");
                 Instant acquired = Instant.parse(properties.getString("datetime"));
-                String platform = properties.getString("platform", "Sentinel-2");
+                JsonValue mission = properties.get("platform");
+                String platform = mission instanceof jakarta.json.JsonString str
+                        && str.getString().matches("sentinel-2[a-z]") ? str.getString() : "Sentinel-2";
                 JsonValue value = properties.get("eo:cloud_cover");
                 Double clouds = value instanceof JsonNumber number ? number.doubleValue() : null;
                 if (clouds != null && !(clouds >= 0 && clouds <= 100)) {
@@ -143,14 +197,18 @@ final class Copernicus {
         return id.matches("[A-Za-z0-9_-][A-Za-z0-9_.-]{0,220}");
     }
 
-    static String tileTemplate(String id) {
+    private static String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    static String tileTemplate(String id, Composite composite) {
         if (!validId(id)) {
             throw new IllegalArgumentException("Invalid STAC item ID.");
         }
         // The live Raster OpenAPI and STAC xyz link use the assets syntax.
         return HOST + "/raster/collections/" + COLLECTION + "/items/" + id
                 + "/tiles/WebMercatorQuad/{zoom}/{x}/{y}.png"
-                + "?assets=reflectance%7Cbands%3Db04%2Cb03%2Cb02&rescale=0%2C1"
+                + "?assets=" + encode("reflectance|bands=" + composite.bands) + "&rescale=" + encode(composite.range)
                 + "&color_formula=gamma%20rgb%201.3%2C%20sigmoidal%20rgb%206%200.1%2C%20saturation%201.2";
     }
 }
