@@ -1,6 +1,6 @@
 # Orbilume user guide
 
-![Orbilume icon](../src/main/resources/images/orbilume/icon.svg)
+For a hands-on example, follow the [Vienna walkthrough](https://github.com/erickfaria/orbilume/wiki/Mapping-Example).
 
 ## Find a scene
 
@@ -17,7 +17,10 @@ Select one Earth Search scene and click **Preview AOI**. The dialog shows a redu
 - **Valid coverage** is the proportion of the sampled AOI with a valid SCL class. Pixels outside the scene, no-data pixels and defective pixels are excluded from the cloud and shadow percentages. Unclassified pixels are included in valid coverage.
 
 The estimate uses samples across the rectangular AOI. It is separate from the catalog's scene-wide percentage. It may miss small clouds, particularly in large AOIs. If the scene lacks a readable SCL band, the preview reports that AOI cloud coverage is unavailable.
+
 ![Natural-color AOI preview with sample cloud, shadow, and coverage estimates](images/orbilume-preview.png)
+
+*Contains modified Copernicus Sentinel data 2026, accessed through Earth Search (Element 84).*
 
 [Copernicus Sentinel-2 classification documentation](https://sentiwiki.copernicus.eu/web/s2-processing)
 
