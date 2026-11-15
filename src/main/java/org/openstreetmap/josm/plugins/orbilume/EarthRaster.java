@@ -473,6 +473,9 @@ final class EarthRaster {
             }
             try {
                 int code = conn.getResponseCode();
+                if (code == 429) {
+                    throw new IOException("Imagery host is rate-limiting requests. Wait before loading another crop.");
+                }
                 if (code != 206) {
                     throw new IOException("Imagery host did not return a partial TIFF response (HTTP " + code + ").");
                 }

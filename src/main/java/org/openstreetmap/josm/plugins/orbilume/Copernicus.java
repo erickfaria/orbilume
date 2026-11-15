@@ -98,6 +98,9 @@ final class Copernicus {
             connection.setRequestProperty("Accept", "application/geo+json, application/json");
             try {
                 int status = connection.getResponseCode();
+                if (status == 429) {
+                    throw new IOException("Imagery catalog is rate-limiting requests. Wait before searching again.");
+                }
                 if (status != 200) {
                     throw new IOException("Imagery catalog returned HTTP " + status + ".");
                 }
@@ -188,6 +191,9 @@ final class Copernicus {
             List<Scene> scenes = new ArrayList<>();
             for (JsonValue feature : features) {
                 JsonObject item = feature.asJsonObject();
+                if (!provider.collection.equals(item.getString("collection", ""))) {
+                    continue;
+                }
                 String id = item.getString("id");
                 if (!validId(id)) {
                     throw new IllegalArgumentException("Invalid STAC item ID.");

@@ -29,6 +29,7 @@ jobs:
           jar tf build/orbilume.jar > "$RUNNER_TEMP/orbilume-contents.txt"
           grep -Fx 'org/openstreetmap/josm/plugins/orbilume/OrbilumePlugin.class' "$RUNNER_TEMP/orbilume-contents.txt"
           grep -Fx 'LICENSE' "$RUNNER_TEMP/orbilume-contents.txt"
+          grep -Fx 'docs/Sources-and-Licenses.md' "$RUNNER_TEMP/orbilume-contents.txt"
           grep -Fx 'images/orbilume/icon.svg' "$RUNNER_TEMP/orbilume-contents.txt"
       - name: Check installation and launch on both JOSM versions
         run: |

@@ -46,6 +46,7 @@ import org.openstreetmap.josm.plugins.Plugin;
 import org.openstreetmap.josm.plugins.PluginInformation;
 import org.openstreetmap.josm.tools.ImageProvider;
 import org.openstreetmap.josm.tools.Logging;
+import org.openstreetmap.josm.tools.OpenBrowser;
 
 public final class OrbilumePlugin extends Plugin {
     public OrbilumePlugin(PluginInformation information) {
@@ -140,9 +141,19 @@ public final class OrbilumePlugin extends Plugin {
             buttons.add(preview);
             buttons.add(compare);
             buttons.add(load);
+            var sources = new JButton("Sources & licenses");
+            sources.addActionListener(event -> {
+                String error = OpenBrowser.displayUrl("https://github.com/erickfaria/orbilume/wiki/Sources-and-Licenses");
+                if (error != null) {
+                    status.setText("Unable to open the sources and licenses page in your browser.");
+                }
+            });
             JPanel footer = new JPanel(new BorderLayout());
             footer.add(status, BorderLayout.CENTER);
-            footer.add(buttons, BorderLayout.SOUTH);
+            JPanel actions = new JPanel(new BorderLayout(8, 0));
+            actions.add(sources, BorderLayout.WEST);
+            actions.add(buttons, BorderLayout.EAST);
+            footer.add(actions, BorderLayout.SOUTH);
             body.add(footer, BorderLayout.SOUTH);
 
             preview.setToolTipText("Earth Search: preview the selected AOI and its estimated cloud cover");

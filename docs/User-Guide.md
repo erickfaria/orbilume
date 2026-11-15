@@ -50,14 +50,8 @@ Look for boundaries that persist across dates. Seasonal color changes, shadows, 
 - **Crop too large** — Zoom in and click **Use map view** again, or select a smaller bounding box.
 - **No pixels or partial coverage** — Choose a scene that covers more of the AOI. A catalog result can intersect only part of the rectangle.
 - **Layer invisible** — Check that the layer is visible, the map is over the AOI, and the projection is Web Mercator for Earth Search.
-- **Network error** — Retry after checking the connection. Closing the search dialog cancels pending work.
+- **Network error** — Check your connection. If the provider is rate-limiting requests, wait before trying again. Closing the search dialog cancels pending work.
 
-## Network and privacy
+## Sources, licenses, and privacy
 
-Searching sends the AOI rectangle, dates, and scene cloud limit to the chosen catalog. For Earth Search, the plugin fetches byte ranges from fixed public HTTPS hosts and decodes imagery locally in memory. Preview may read the SCL band in addition to the true-color band. Comparison keeps both crops in memory until the layer is removed. EOPF tiles use JOSM's normal imagery cache and proxy settings.
-
-Object IDs, tags and edit contents stay in JOSM. Orbilume has no telemetry and cannot publish changes to OpenStreetMap.
-
-- [Earth Search](https://github.com/Element84/earth-search)
-- [Sentinel-2 open data](https://registry.opendata.aws/sentinel-2-l2a-cogs/)
-- [Copernicus EOPF Explorer](https://explorer.eopf.copernicus.eu/)
+Click **Sources & licenses** in the dialog, or read [Sources, licenses, and privacy](Sources-and-Licenses.md) for the original terms and details about what each provider receives.
