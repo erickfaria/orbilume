@@ -46,20 +46,26 @@ jobs:
             <list key="plugins"><entry value="orbilume"/></list>
             <list key="imagery.layers.default"/>
             <tag key="message.sanityCheckFailed" value="false"/>
+            <tag key="message.sanityCheckFailed.value" value="2"/>
             <tag key="message.welcome.show" value="false"/>
+            <tag key="prefer.ipv6" value="false"/>
+            <list key="mappaint.style.known-defaults">
+              <entry value="resource://styles/standard/elemstyles.mapcss"/>
+            </list>
           </preferences>
           XML
-          timeout 50s xvfb-run --auto-servernum java -Djosm.pref="$profile/prefs" \
+          printf '%s\n' '<osm version="0.6" upload="never"><node id="-1" lat="0" lon="0"/></osm>' > "$profile/map.osm"
+          timeout 65s xvfb-run --auto-servernum java -Djosm.pref="$profile/prefs" \
             -Djosm.userdata="$profile/data" -Djosm.cache="$profile/cache" -jar "$josm" \
-            --language=en --offline=all > "$profile/startup.log" 2>&1 &
+            --language=en --offline=all "$profile/map.osm" > "$profile/startup.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true; rm -rf "$profile"' EXIT
-          for attempt in {1..35}; do
+          for attempt in {1..55}; do
             if grep -Eiq "Could not load plugin|Failed to load plugin|PluginException|UnsupportedClassVersionError" "$profile/startup.log"; then
               break
             fi
             if grep -q "loading plugin 'orbilume'" "$profile/startup.log" &&
-               grep -Eq 'Changeset updater active|Message notifier not available' "$profile/startup.log"; then
+               grep -Fq "Open file: $profile/map.osm" "$profile/startup.log"; then
               grep "loading plugin 'orbilume'" "$profile/startup.log"
               exit 0
             fi
