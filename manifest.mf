@@ -1,7 +1,10 @@
 Manifest-Version: 1.0
 Plugin-Class: org.openstreetmap.josm.plugins.orbilume.OrbilumePlugin
-Plugin-Version: 0.3.0
+Plugin-Version: 0.3.1
 Plugin-Mainversion: 19369
+Plugin-Minimum-Java-Version: 17
+Author: Erick Faria
+Plugin-Icon: images/orbilume/icon.svg
 Plugin-Description: Discover and display Sentinel-2 imagery from Earth Search and Copernicus EOPF Explorer.
-Plugin-Link: https://github.com/erickfaria/orbilume
+Plugin-Link: https://github.com/erickfaria/orbilume/wiki
 Plugin-Stage: 60

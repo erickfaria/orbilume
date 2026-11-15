@@ -35,12 +35,17 @@ import org.openstreetmap.josm.gui.MainApplication;
 import org.openstreetmap.josm.gui.layer.ImageryLayer;
 import org.openstreetmap.josm.plugins.Plugin;
 import org.openstreetmap.josm.plugins.PluginInformation;
+import org.openstreetmap.josm.tools.ImageProvider;
 import org.openstreetmap.josm.tools.Logging;
 
 public final class OrbilumePlugin extends Plugin {
     public OrbilumePlugin(PluginInformation information) {
         super(information);
-        MainApplication.getMenu().imagerySubMenu.add(new AbstractAction("Orbilume") {
+        var icon = new ImageProvider(information.iconPath)
+                .setArchive(information.file)
+                .setSize(16, 16)
+                .get();
+        MainApplication.getMenu().imagerySubMenu.add(new AbstractAction("Orbilume", icon) {
             @Override
             public void actionPerformed(ActionEvent event) {
                 new SceneDialog().setVisible(true);
