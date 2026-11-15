@@ -10,4 +10,4 @@ rm -rf build/classes
 mkdir -p build/classes
 find src/main/java -name '*.java' -print > build/sources.txt
 javac --release 17 -encoding UTF-8 -cp "$josm_jar" -d build/classes @build/sources.txt
-jar --create --file build/orbilume.jar --manifest manifest.mf -C build/classes . -C src/main/resources . LICENSE
+jar --create --file build/orbilume.jar --manifest manifest.mf -C build/classes . -C src/main/resources . LICENSE docs/Sources-and-Licenses.md
