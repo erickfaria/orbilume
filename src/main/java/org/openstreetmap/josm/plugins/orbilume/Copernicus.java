@@ -26,6 +26,7 @@ final class Copernicus {
     private static final String HOST = "https://api.explorer.eopf.copernicus.eu";
     private static final String COLLECTION = "sentinel-2-l2a";
     private static final int LIMIT = 20;
+    static final String USER_AGENT = "Orbilume (+https://github.com/erickfaria/orbilume)";
 
     enum Provider {
         EARTH_SEARCH("Earth Search (Element 84)", "https://earth-search.aws.element84.com/v1/search", "sentinel-2-c1-l2a"),
@@ -95,6 +96,7 @@ final class Copernicus {
             connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(8000);
             connection.setReadTimeout(15000);
+            connection.setRequestProperty("User-Agent", USER_AGENT);
             connection.setRequestProperty("Accept", "application/geo+json, application/json");
             try {
                 int status = connection.getResponseCode();

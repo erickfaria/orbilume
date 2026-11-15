@@ -143,7 +143,7 @@ public final class OrbilumePlugin extends Plugin {
             buttons.add(load);
             var sources = new JButton("Sources & licenses");
             sources.addActionListener(event -> {
-                String error = OpenBrowser.displayUrl("https://github.com/erickfaria/orbilume/wiki/Sources-and-Licenses");
+                String error = OpenBrowser.displayUrl("https://github.com/erickfaria/orbilume/blob/main/docs/Sources-and-Licenses.md");
                 if (error != null) {
                     status.setText("Unable to open the sources and licenses page in your browser.");
                 }
