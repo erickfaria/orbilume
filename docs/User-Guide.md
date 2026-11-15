@@ -1,30 +1,62 @@
-# Orbilume User Guide
+# Orbilume user guide
 
-## Search and load imagery
+![Orbilume icon](../src/main/resources/images/orbilume/icon.svg)
 
-Use **Imagery → Orbilume**. The area of interest can come from the viewport, a selection's bounding rectangle, or a pasted bounding box. Use decimal degrees in west, south, east, north order, with commas between values. Dates use `YYYY-MM-DD`.
+## Find a scene
 
-![Orbilume search dialog with area, dates, scene cloud limit, provider, and composition settings](images/orbilume-search.png)
+Open **Imagery → Orbilume**. Set the area of interest (AOI) from the map view, a selection's bounding rectangle, or a pasted box. Enter coordinates in **west, south, east, north** order, in decimal degrees. Dates use `YYYY-MM-DD`.
 
-| Composition | Red, green, blue channels | Use |
+Set the provider, dates and maximum scene cloud cover, then click **Search**. Up to 20 scenes are shown, with the least cloudy scenes first. Scenes without a valid cloud percentage are excluded. Changing the AOI or search filters clears results, so the next operation uses the displayed search.
+
+## Preview the AOI
+
+Select one Earth Search scene and click **Preview AOI**. The dialog shows a reduced natural-color crop, at most 384 pixels per side, and estimates from the Sentinel-2 Level-2A Scene Classification Layer (SCL).
+
+- **Cloud** counts medium- and high-probability cloud and thin cirrus (SCL 8–10).
+- **Cloud shadow** counts SCL 3 separately.
+- **Valid coverage** is the proportion of the sampled AOI with a valid SCL class. Pixels outside the scene, no-data pixels and defective pixels are excluded from the cloud and shadow percentages. Unclassified pixels are included in valid coverage.
+
+The estimate uses samples across the rectangular AOI. It is separate from the catalog's scene-wide percentage. It may miss small clouds, particularly in large AOIs. If the scene lacks a readable SCL band, the preview reports that AOI cloud coverage is unavailable.
+![Natural-color AOI preview with sample cloud, shadow, and coverage estimates](images/orbilume-preview.png)
+
+[Copernicus Sentinel-2 classification documentation](https://sentiwiki.copernicus.eu/web/s2-processing)
+
+## Load a composition
+
+| Composition | Red, green, blue channels | Typical use |
 | --- | --- | --- |
-| Natural color | B04, B03, B02 | Visual context and interpretation |
-| Vegetation (near infrared) | B08, B04, B03 | Contrast between vegetation and other surfaces |
+| Natural color | B04, B03, B02 | Visual context |
+| Vegetation (near infrared) | B08, B04, B03 | Distinguish vegetation from other surfaces |
 | Soil and vegetation (SWIR) | B12, B8A, B04 | Compare exposed soil and vegetation |
 
-Select a scene and click **Load imagery**. Use the Layers panel to hide or remove the imagery. Inspect multiple dates before interpreting changes in vegetation or drawing land-use boundaries.
+Select one scene, choose a composition and click **Load imagery**. The imagery appears as a layer in JOSM. Hide or remove it from the Layers panel.
 
-## Coverage and clouds
+## Compare two dates
 
-- **Earth Search** loads a crop within the searched rectangle. Use Web Mercator (EPSG:3857). A crop can be up to 2,048 pixels per side.
-- **Copernicus EOPF Explorer** loads imagery tiles through JOSM. Tiles can extend beyond the search rectangle, and coverage depends on the provider's catalog.
-- Search displays up to 20 scenes, with lower reported cloud cover first. Scenes without valid cloud metadata are excluded. The percentage describes the full scene and no per-pixel cloud mask is applied.
+1. Search **Earth Search** over the same AOI and select two rows from different acquisition dates with Ctrl-click (Cmd-click on macOS) or Shift-click.
+2. Choose one composition and click **Compare dates**. Both dates are loaded into a single layer on the same AOI and grid.
+3. Right-click the comparison layer in the Layers panel and choose **Switch to [date]**. The layer name shows the displayed date. Switching keeps your map position and zoom.
 
-If a search is empty, try a longer historical date range, a higher cloud limit, or Earth Search. If a crop is too large, zoom in and update the area from the map view. For a blank Earth Search layer, verify that JOSM is set to Web Mercator and check the scene's coverage.
+Look for boundaries that persist across dates. Seasonal color changes, shadows, and changes in exposure can make fields look different.
+
+## Provider limits and troubleshooting
+
+| Provider | Imagery loading | AOI preview and date comparison |
+| --- | --- | --- |
+| Earth Search (Element 84) | A crop within the AOI, up to 2,048 pixels per side. Use Web Mercator (EPSG:3857). | Available |
+| Copernicus EOPF Explorer | JOSM imagery tiles, which can extend beyond the AOI. | Use Earth Search for these features |
+
+- **Empty search** — Try a longer date range, a higher scene cloud limit, or Earth Search.
+- **Crop too large** — Zoom in and click **Use map view** again, or select a smaller bounding box.
+- **No pixels or partial coverage** — Choose a scene that covers more of the AOI. A catalog result can intersect only part of the rectangle.
+- **Layer invisible** — Check that the layer is visible, the map is over the AOI, and the projection is Web Mercator for Earth Search.
+- **Network error** — Retry after checking the connection. Closing the search dialog cancels pending work.
 
 ## Network and privacy
 
-Search sends the area rectangle, dates and cloud limit to the chosen catalog. JOSM object IDs, tags and edit contents stay in the editor. Earth Search imagery is read over HTTPS from fixed public hosts, with checks on the asset path, redirects, dimensions and bytes read. Crops are decoded locally in memory. EOPF tiles use JOSM's imagery cache and proxy settings.
+Searching sends the AOI rectangle, dates, and scene cloud limit to the chosen catalog. For Earth Search, the plugin fetches byte ranges from fixed public HTTPS hosts and decodes imagery locally in memory. Preview may read the SCL band in addition to the true-color band. Comparison keeps both crops in memory until the layer is removed. EOPF tiles use JOSM's normal imagery cache and proxy settings.
+
+Object IDs, tags and edit contents stay in JOSM. Orbilume has no telemetry and cannot publish changes to OpenStreetMap.
 
 - [Earth Search](https://github.com/Element84/earth-search)
 - [Sentinel-2 open data](https://registry.opendata.aws/sentinel-2-l2a-cogs/)
