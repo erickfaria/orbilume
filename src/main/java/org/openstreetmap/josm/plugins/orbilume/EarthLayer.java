@@ -2,27 +2,46 @@ package org.openstreetmap.josm.plugins.orbilume;
 
 import java.awt.Graphics2D;
 import java.awt.geom.AffineTransform;
+import java.awt.event.ActionEvent;
+import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.Icon;
 import org.openstreetmap.josm.data.Bounds;
 import org.openstreetmap.josm.data.coor.LatLon;
 import org.openstreetmap.josm.data.osm.visitor.BoundingXYVisitor;
 import org.openstreetmap.josm.data.projection.Projection;
+import org.openstreetmap.josm.gui.MainApplication;
 import org.openstreetmap.josm.gui.MapView;
 import org.openstreetmap.josm.gui.dialogs.LayerListDialog;
 import org.openstreetmap.josm.gui.layer.Layer;
 import org.openstreetmap.josm.tools.ImageProvider;
 
 final class EarthLayer extends Layer {
-    private final EarthRaster.Image image;
-    private final String attribution;
+    record Frame(EarthRaster.Image image, Copernicus.Scene scene) {
+        String date() {
+            return scene.acquired().toString().substring(0, 10);
+        }
+    }
+
+    private Frame current;
+    private Frame alternate;
+    private final Copernicus.Composite composite;
 
     EarthLayer(EarthRaster.Image image, Copernicus.Scene scene, Copernicus.Composite composite) {
-        super("Orbilume • " + composite + " • " + scene.acquired().toString().substring(0, 10)
-                + " • " + scene.id());
-        this.image = image;
-        this.attribution = scene.attribution() + " • Earth Search / Element 84";
+        this(new Frame(image, scene), null, composite);
+    }
+
+    EarthLayer(Frame first, Frame second, Copernicus.Composite composite) {
+        super(layerName(first, second, composite));
+        this.current = first;
+        this.alternate = second;
+        this.composite = composite;
         setBackgroundLayer(true);
+    }
+
+    private static String layerName(Frame current, Frame alternate, Copernicus.Composite composite) {
+        return "Orbilume • " + composite + " • " + current.date()
+                + (alternate == null ? " • " + current.scene().id() : " (compare " + alternate.date() + ")");
     }
 
     @Override
@@ -30,6 +49,7 @@ final class EarthLayer extends Layer {
         if (!isProjectionSupported(view.getProjection())) {
             return;
         }
+        var image = current.image();
         Bounds bounds = image.bounds();
         var nw = view.getPoint2D(new LatLon(bounds.getMaxLat(), bounds.getMinLon()));
         var se = view.getPoint2D(new LatLon(bounds.getMinLat(), bounds.getMaxLon()));
@@ -57,12 +77,12 @@ final class EarthLayer extends Layer {
 
     @Override
     public String getToolTipText() {
-        return attribution;
+        return current.scene().attribution() + " • Earth Search / Element 84 • " + current.scene().id();
     }
 
     @Override
     public Object getInfoComponent() {
-        return attribution;
+        return getToolTipText();
     }
 
     @Override
@@ -77,12 +97,28 @@ final class EarthLayer extends Layer {
 
     @Override
     public void visitBoundingBox(BoundingXYVisitor visitor) {
-        visitor.visit(image.bounds());
+        visitor.visit(current.image().bounds());
     }
 
     @Override
     public Action[] getMenuEntries() {
         var dialog = LayerListDialog.getInstance();
-        return new Action[]{dialog.createShowHideLayerAction(), dialog.createDeleteLayerAction()};
+        if (alternate == null) {
+            return new Action[]{dialog.createShowHideLayerAction(), dialog.createDeleteLayerAction()};
+        }
+        var swap = new AbstractAction("Switch to " + alternate.date()) {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                Frame previous = current;
+                current = alternate;
+                alternate = previous;
+                putValue(NAME, "Switch to " + alternate.date());
+                setName(layerName(current, alternate, composite));
+                if (MainApplication.isDisplayingMapView()) {
+                    MainApplication.getMap().mapView.repaint();
+                }
+            }
+        };
+        return new Action[]{swap, dialog.createShowHideLayerAction(), dialog.createDeleteLayerAction()};
     }
 }

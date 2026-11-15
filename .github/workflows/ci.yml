@@ -3,6 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,6 +12,7 @@ jobs:
   plugin:
     name: Build and test plugin
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -19,13 +21,65 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Get JOSM
-        run: curl --fail --location --retry 3 --max-time 45 -o "$RUNNER_TEMP/josm.jar" https://josm.openstreetmap.de/josm-tested.jar
-      - name: Build the release JAR
-        run: JOSM_JAR="$RUNNER_TEMP/josm.jar" ./build.sh
-      - name: Verify packaging
+      - name: Get current stable JOSM
+        run: curl --fail --location --retry 3 --max-time 180 -o "$RUNNER_TEMP/josm.jar" https://josm.openstreetmap.de/josm-tested.jar
+      - name: Build one release JAR and verify packaging
         run: |
+          JOSM_JAR="$RUNNER_TEMP/josm.jar" ./build.sh
           jar tf build/orbilume.jar > "$RUNNER_TEMP/orbilume-contents.txt"
           grep -Fx 'org/openstreetmap/josm/plugins/orbilume/OrbilumePlugin.class' "$RUNNER_TEMP/orbilume-contents.txt"
           grep -Fx 'LICENSE' "$RUNNER_TEMP/orbilume-contents.txt"
-          grep -Fx "images/orbilume/icon.svg" "$RUNNER_TEMP/orbilume-contents.txt"
+          grep -Fx 'images/orbilume/icon.svg' "$RUNNER_TEMP/orbilume-contents.txt"
+      - name: Check installation and launch on both JOSM versions
+        run: |
+          cat > "$RUNNER_TEMP/start-josm" <<'SH'
+          #!/bin/bash
+          set -euo pipefail
+          josm=$1
+          plugin=$2
+          profile=$(mktemp -d)
+          mkdir -p "$profile/prefs" "$profile/data/plugins"
+          cp "$plugin" "$profile/data/plugins/orbilume.jar"
+          cat > "$profile/prefs/preferences.xml" <<'XML'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <preferences xmlns="http://josm.openstreetmap.de/preferences-1.0" version="19369">
+            <list key="plugins"><entry value="orbilume"/></list>
+            <list key="imagery.layers.default"/>
+            <tag key="message.sanityCheckFailed" value="false"/>
+            <tag key="message.sanityCheckFailed.value" value="2"/>
+            <tag key="message.welcome.show" value="false"/>
+            <tag key="prefer.ipv6" value="false"/>
+            <list key="mappaint.style.known-defaults">
+              <entry value="resource://styles/standard/elemstyles.mapcss"/>
+            </list>
+          </preferences>
+          XML
+          printf '%s\n' '<osm version="0.6" upload="never"><node id="-1" lat="0" lon="0"/></osm>' > "$profile/map.osm"
+          timeout 65s xvfb-run --auto-servernum java -Djosm.pref="$profile/prefs" \
+            -Djosm.userdata="$profile/data" -Djosm.cache="$profile/cache" -jar "$josm" \
+            --language=en --offline=all "$profile/map.osm" > "$profile/startup.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true; rm -rf "$profile"' EXIT
+          for attempt in {1..55}; do
+            if grep -Eiq "Could not load plugin|Failed to load plugin|PluginException|UnsupportedClassVersionError" "$profile/startup.log"; then
+              break
+            fi
+            if grep -q "loading plugin 'orbilume'" "$profile/startup.log" &&
+               grep -Fq "Open file: $profile/map.osm" "$profile/startup.log"; then
+              grep "loading plugin 'orbilume'" "$profile/startup.log"
+              exit 0
+            fi
+            kill -0 "$pid" || break
+            sleep 1
+          done
+          cat "$profile/startup.log"
+          exit 1
+          SH
+          bash "$RUNNER_TEMP/start-josm" "$RUNNER_TEMP/josm.jar" "$PWD/build/orbilume.jar"
+          docker run --rm -e DEBIAN_FRONTEND=noninteractive \
+            -v "$RUNNER_TEMP/start-josm:/start-josm:ro" \
+            -v "$PWD/build/orbilume.jar:/orbilume.jar:ro" debian:13-slim bash -euc '
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends josm=0.0.svn19369+dfsg-2 xvfb xauth
+              bash /start-josm /usr/share/josm/josm.jar /orbilume.jar
+            '

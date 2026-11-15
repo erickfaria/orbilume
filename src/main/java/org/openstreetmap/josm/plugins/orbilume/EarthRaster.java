@@ -17,6 +17,7 @@ import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStreamImpl;
 import javax.net.ssl.HttpsURLConnection;
 import org.openstreetmap.josm.data.Bounds;
+import org.openstreetmap.josm.tools.Logging;
 import org.openstreetmap.josm.data.coor.EastNorth;
 import org.openstreetmap.josm.data.coor.LatLon;
 import org.openstreetmap.josm.data.projection.Projection;
@@ -26,7 +27,7 @@ final class EarthRaster {
     private static final String HOST = "e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com";
     private static final int MAX_PIXELS = 2048;
     private static final Map<String, String> FILES = Map.of("visual", "TCI", "nir", "B08",
-            "green", "B03", "red", "B04", "nir08", "B8A", "swir22", "B12");
+            "green", "B03", "red", "B04", "nir08", "B8A", "swir22", "B12", "scl", "SCL");
 
     record Asset(URI uri, int width, int height, double west, double north, double pixel,
                  double scale, double offset) {
@@ -41,42 +42,68 @@ final class EarthRaster {
 
     record Image(BufferedImage pixels, Bounds bounds) {}
 
+    record CloudCoverage(int clouds, int shadows, int valid, int samples) {
+        double cloudPercent() { return 100.0 * clouds / valid; }
+        double shadowPercent() { return 100.0 * shadows / valid; }
+        double coveragePercent() { return 100.0 * valid / samples; }
+    }
+
+    record Preview(Image image, CloudCoverage coverage) {}
+
     static Map<String, Asset> assets(JsonObject source, String scene) {
         if (source == null) {
             return Map.of();
         }
         Map<String, Asset> result = new HashMap<>();
         for (var file : FILES.entrySet()) {
-            JsonObject item = source.getJsonObject(file.getKey());
-            if (item == null) {
-                continue;
+            try {
+                var asset = parseAsset(source.getJsonObject(file.getKey()), scene, file.getValue());
+                if (asset != null) {
+                    result.put(file.getKey(), asset);
+                }
+            } catch (IllegalArgumentException | ArithmeticException | ClassCastException | NullPointerException e) {
+                // An invalid optional asset cannot invalidate the other bands of a scene.
+                Logging.debug(e);
             }
-            URI uri = URI.create(item.getString("href"));
-            if (!allowed(uri, scene, file.getValue())) {
-                continue;
-            }
-            JsonArray shape = item.getJsonArray("proj:shape");
-            JsonArray transform = item.getJsonArray("proj:transform");
-            int height = shape.getJsonNumber(0).intValueExact();
-            int width = shape.getJsonNumber(1).intValueExact();
-            double pixel = number(transform, 0);
-            double west = number(transform, 2);
-            double north = number(transform, 5);
-            if (width <= 0 || height <= 0 || width > 12000 || height > 12000
-                    || (pixel != 10 && pixel != 20) || number(transform, 1) != 0
-                    || number(transform, 3) != 0 || number(transform, 4) != -pixel
-                    || west < 0 || west > 1_000_000 || north < 0 || north > 10_000_000) {
-                continue;
-            }
-            JsonObject band = item.getJsonArray("raster:bands").getJsonObject(0);
-            double scale = band.get("scale") instanceof JsonNumber n ? n.doubleValue() : 1;
-            double offset = band.get("offset") instanceof JsonNumber n ? n.doubleValue() : 0;
-            if (!(scale > 0 && scale <= 1 && Math.abs(offset) <= 1)) {
-                continue;
-            }
-            result.put(file.getKey(), new Asset(uri, width, height, west, north, pixel, scale, offset));
         }
         return Map.copyOf(result);
+    }
+
+    private static Asset parseAsset(JsonObject item, String scene, String filename) {
+        if (item == null) {
+            return null;
+        }
+        URI uri = URI.create(item.getString("href"));
+        if (!allowed(uri, scene, filename)) {
+            return null;
+        }
+        JsonArray shape = item.getJsonArray("proj:shape");
+        JsonArray transform = item.getJsonArray("proj:transform");
+        if (shape == null || shape.size() < 2 || transform == null || transform.size() < 6) {
+            return null;
+        }
+        int height = shape.getJsonNumber(0).intValueExact();
+        int width = shape.getJsonNumber(1).intValueExact();
+        double pixel = number(transform, 0);
+        double west = number(transform, 2);
+        double north = number(transform, 5);
+        if (width <= 0 || height <= 0 || width > 12000 || height > 12000
+                || (pixel != 10 && pixel != 20) || number(transform, 1) != 0
+                || number(transform, 3) != 0 || number(transform, 4) != -pixel
+                || !(west >= 0 && west <= 1_000_000 && north >= 0 && north <= 10_000_000)) {
+            return null;
+        }
+        JsonArray bands = item.getJsonArray("raster:bands");
+        if (bands == null || bands.isEmpty()) {
+            return null;
+        }
+        JsonObject band = bands.getJsonObject(0);
+        double scale = band.get("scale") instanceof JsonNumber n ? n.doubleValue() : 1;
+        double offset = band.get("offset") instanceof JsonNumber n ? n.doubleValue() : 0;
+        if (!(scale > 0 && scale <= 1 && Math.abs(offset) <= 1)) {
+            return null;
+        }
+        return new Asset(uri, width, height, west, north, pixel, scale, offset);
     }
 
     static boolean allowed(URI uri, String scene, String band) {
@@ -92,6 +119,15 @@ final class EarthRaster {
     }
 
     static Image load(Copernicus.Scene scene, Copernicus.Composite composite, Bounds bounds) throws IOException {
+        return render(scene, composite, bounds, false).image();
+    }
+
+    static Preview preview(Copernicus.Scene scene, Bounds bounds) throws IOException {
+        return render(scene, Copernicus.Composite.NATURAL, bounds, true);
+    }
+
+    private static Preview render(Copernicus.Scene scene, Copernicus.Composite composite, Bounds bounds,
+                                  boolean preview) throws IOException {
         if (bounds.getMaxLat() > 85 || bounds.getMinLat() < -85) {
             throw new IOException("The imagery crop must be within Web Mercator latitude limits.");
         }
@@ -104,6 +140,11 @@ final class EarthRaster {
         int height = (int) Math.ceil((nw.north() - se.north()) / resolution);
         if (width <= 0 || height <= 0 || width > MAX_PIXELS || height > MAX_PIXELS) {
             throw new IOException("Zoom in or use a smaller AOI (up to 2,048 pixels per side).");
+        }
+        if (preview) {
+            double factor = Math.min(0.5, 384.0 / Math.max(width, height));
+            width = Math.max(1, (int) Math.ceil(width * factor));
+            height = Math.max(1, (int) Math.ceil(height * factor));
         }
         double dx = (se.east() - nw.east()) / width;
         double dy = (nw.north() - se.north()) / height;
@@ -138,17 +179,30 @@ final class EarthRaster {
             if (asset == null) {
                 throw new IOException("This scene is missing the " + key + " band.");
             }
-            int x = Math.max(0, asset.x(new EastNorth(minX, minY)));
-            int y = Math.max(0, asset.y(new EastNorth(minX, maxY)));
-            int right = Math.min(asset.width(), asset.x(new EastNorth(maxX, maxY)) + 1);
-            int bottom = Math.min(asset.height(), asset.y(new EastNorth(maxX, minY)) + 1);
-            if (right <= x || bottom <= y) {
-                throw new IOException("The scene does not cover the selected AOI.");
+            inputs.add(read(asset, region(asset, minX, minY, maxX, maxY), keys.size() == 1 ? 3 : 1));
+        }
+        CloudCoverage coverage = null;
+        Asset scl = scene.assets().get("scl");
+        if (preview && scl != null) {
+            try {
+                var mask = readTiff(scl, region(scl, minX, minY, maxX, maxY), 1);
+                int clouds = 0, shadows = 0, valid = 0;
+                for (int i = 0; i < eastings.length; i++) {
+                    int code = mask.raw(eastings[i], northings[i], 0);
+                    if (code >= 2 && code <= 11) {
+                        valid++;
+                        if (code == 3) {
+                            shadows++;
+                        } else if (code >= 8 && code <= 10) {
+                            clouds++;
+                        }
+                    }
+                }
+                coverage = new CloudCoverage(clouds, shadows, valid, eastings.length);
+            } catch (IOException e) {
+                checkInterrupted();
+                Logging.debug(e);
             }
-            if (right - x > 4608 || bottom - y > 4608) {
-                throw new IOException("The source window is too large for a local crop.");
-            }
-            inputs.add(read(asset, new Rectangle(x, y, right - x, bottom - y), keys.size() == 1 ? 3 : 1));
         }
         int[] pixels = new int[eastings.length];
         boolean visible = false;
@@ -176,18 +230,37 @@ final class EarthRaster {
         }
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         image.setRGB(0, 0, width, height, pixels, 0, width);
-        return new Image(image, bounds);
+        return new Preview(new Image(image, bounds), coverage);
+    }
+
+    private static Rectangle region(Asset asset, double minX, double minY, double maxX, double maxY)
+            throws IOException {
+        int left = Math.max(0, asset.x(new EastNorth(minX, minY)));
+        int top = Math.max(0, asset.y(new EastNorth(minX, maxY)));
+        int right = Math.min(asset.width(), asset.x(new EastNorth(maxX, maxY)) + 1);
+        int bottom = Math.min(asset.height(), asset.y(new EastNorth(maxX, minY)) + 1);
+        if (right <= left || bottom <= top) {
+            throw new IOException("The scene does not cover the selected AOI.");
+        }
+        if (right - left > 4608 || bottom - top > 4608) {
+            throw new IOException("The source window is too large for a local crop.");
+        }
+        return new Rectangle(left, top, right - left, bottom - top);
     }
 
     private record Window(Asset asset, Rectangle area, Raster raster, boolean natural) {
         int sample(double east, double north, int band) {
+            int value = raw(east, north, band);
+            return natural || value < 0 ? value : value == 0 ? -1 : stretch(value, asset.scale(), asset.offset());
+        }
+
+        int raw(double east, double north, int band) {
             int x = (int) Math.floor((east - asset.west()) / asset.pixel());
             int y = (int) Math.floor((asset.north() - north) / asset.pixel());
             if (!area.contains(x, y)) {
                 return -1;
             }
-            int raw = raster.getSample(x - area.x, y - area.y, band);
-            return natural ? raw : raw == 0 ? -1 : stretch(raw, asset.scale(), asset.offset());
+            return raster.getSample(x - area.x, y - area.y, band);
         }
     }
 
@@ -202,6 +275,10 @@ final class EarthRaster {
                 return new Window(asset, region, readBand(input, asset, region), false);
             }
         }
+        return readTiff(asset, region, bands);
+    }
+
+    private static Window readTiff(Asset asset, Rectangle region, int bands) throws IOException {
         ImageReader reader = ImageIO.getImageReadersByFormatName("TIFF").next();
         try (var input = new RangeStream(asset.uri())) {
             reader.setInput(input);

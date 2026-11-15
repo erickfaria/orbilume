@@ -1,6 +1,6 @@
 Manifest-Version: 1.0
 Plugin-Class: org.openstreetmap.josm.plugins.orbilume.OrbilumePlugin
-Plugin-Version: 0.3.1
+Plugin-Version: 0.4.0
 Plugin-Mainversion: 19369
 Plugin-Minimum-Java-Version: 17
 Author: Erick Faria

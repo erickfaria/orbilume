@@ -1,38 +1,51 @@
-# Orbilume
+<p align="center">
+  <img src="src/main/resources/images/orbilume/icon.svg" width="64" height="64" alt="">
+</p>
+<h1 align="center">Orbilume</h1>
+<p align="center">Find, preview, and compare Sentinel-2 imagery in JOSM.</p>
+<p align="center">
+  <a href="https://github.com/erickfaria/orbilume/releases/latest">Download</a> ·
+  <a href="docs/User-Guide.md">User guide</a> ·
+  <a href="https://github.com/erickfaria/orbilume/wiki">Wiki</a> ·
+  <a href="https://github.com/erickfaria/orbilume/issues">Support</a>
+</p>
 
-Orbilume is a free, open-source JOSM plugin for finding and viewing Sentinel-2 Level-2A imagery. Search an area of interest, select a scene, and open it as a native JOSM imagery layer.
-
-![Sentinel-2 natural-color imagery displayed in a native Orbilume layer in JOSM](docs/images/orbilume-josm.png)
+![A natural-color Sentinel-2 crop displayed as a JOSM imagery layer](docs/images/orbilume-josm.png)
 
 *Contains modified Copernicus Sentinel data 2026, accessed through Earth Search (Element 84).*
 
+## What you can do
+
+- Set an area of interest (AOI) from the map view, selected objects, or a bounding box. Search Sentinel-2 Level-2A scenes by date and scene-wide cloud cover.
+- Preview an Earth Search crop in natural color and estimate cloud, cloud shadow, and valid coverage within the AOI before loading a full composition.
+- View natural color, near-infrared vegetation, or shortwave-infrared soil and vegetation. Compare two Earth Search dates in one layer without moving the map when switching dates.
+
 ## Install
 
-Use JOSM **r19369 or later** with **Java 17 or later**. Download `orbilume.jar` from the [GitHub release](https://github.com/erickfaria/orbilume/releases/latest). Keep the filename unchanged and place it in JOSM's plugins directory. On a standard Debian installation, that directory is `${XDG_DATA_HOME:-$HOME/.local/share}/JOSM/plugins`.
+Use **JOSM r19369 or later** and **Java 17 or later**. Download [`orbilume.jar`](https://github.com/erickfaria/orbilume/releases/latest/download/orbilume.jar) and copy it into the JOSM plugins directory, keeping the filename. On a standard Debian installation, the directory is `${XDG_DATA_HOME:-$HOME/.local/share}/JOSM/plugins`.
 
-Restart JOSM, enable **orbilume** under **Preferences → Plugins**, and restart again if prompted. Then open **Imagery → Orbilume**.
+Restart JOSM, enable **orbilume** in **Preferences → Plugins**, and restart again if prompted. If your JOSM catalog already lists **orbilume**, you can install it there directly. The features described on this branch require v0.4.0 or later.
 
 ## Quick start
 
-1. Click **Use map view** or **Use selection** to set the area of interest. You can also paste a bounding box in **west, south, east, north** order using decimal degrees.
-2. Choose **Earth Search (Element 84)** or **Copernicus EOPF Explorer**. Set the date range and maximum scene cloud cover, then click **Search**.
-3. Select a scene and choose **Natural color**, **Vegetation (near infrared)**, or **Soil and vegetation (SWIR)**. Click **Load imagery**.
+1. Open **Imagery → Orbilume**. Choose **Use map view** or **Use selection**.
+2. Choose a provider, set the date range and scene cloud limit, then click **Search**.
+3. With **Earth Search**, select one scene and click **Preview AOI**. Choose a composition and click **Load imagery**, or select two acquisitions and click **Compare dates**.
+4. Right-click the comparison layer and choose **Switch to [date]** to toggle the image while keeping your map view.
 
-Cloud cover is measured across the full scene. Check the loaded image for clouds within your area. Orbilume displays imagery and has no telemetry, OSM editing, or upload features.
+Earth Search crops and comparison layers use Web Mercator (EPSG:3857). See the [user guide](docs/User-Guide.md) for the cloud estimate, band combinations, provider limits, and troubleshooting.
 
-See the [user guide](docs/User-Guide.md) for band combinations, provider limits, troubleshooting, and network behavior.
+## Build
 
-## Build from source
-
-Use JDK 21 and a compatible JOSM JAR. The build targets Java 17.
+Use JDK 21 and a JOSM JAR. The build targets Java 17 and produces `build/orbilume.jar`.
 
 ```sh
 ./build.sh
 JOSM_JAR=/path/to/josm.jar ./build.sh
 ```
 
-The plugin is written to `build/orbilume.jar`.
+## Privacy and license
 
-## License
+Orbilume sends the AOI rectangle and search filters to the selected imagery provider. It has no accounts, telemetry, OSM editing, or upload features. See [network and privacy details](docs/User-Guide.md#network-and-privacy).
 
-Orbilume is licensed under [GNU GPL v3](LICENSE). Imagery is provided under its source terms and attributed in the JOSM layer.
+Licensed under [GNU GPL v3](LICENSE). Imagery follows its source terms and is attributed in JOSM.
