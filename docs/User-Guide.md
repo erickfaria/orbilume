@@ -55,6 +55,10 @@ Look for boundaries that persist across dates. Seasonal color changes, shadows, 
 - **Layer invisible** — Check that the layer is visible, the map is over the AOI, and the projection is Web Mercator for Earth Search.
 - **Network error** — Check your connection. If the provider is rate-limiting requests, wait before trying again. Closing the search dialog cancels pending work.
 
+## Credit the source when mapping
+
+When you use the imagery to make an OpenStreetMap edit, use `source=Sentinel-2` in the changeset and credit any other sources used. Orbilume leaves editing and upload in your hands. [OpenStreetMap Sentinel-2 changeset guidance](https://wiki.openstreetmap.org/wiki/Sentinel-2#Changeset_Source)
+
 ## Sources, licenses, and privacy
 
 Click **Sources & licenses** in the dialog, or read [Sources, licenses, and privacy](Sources-and-Licenses.md) for the original terms and details about what each provider receives.

@@ -16,7 +16,7 @@ JOSM_JAR=/path/to/josm.jar ./build.sh
 jar tf build/orbilume.jar
 ```
 
-The output is `build/orbilume.jar`. Place it in the plugins directory of a separate JOSM profile when checking changes. Open **Imagery → Orbilume** and verify the affected search, preview, or layer workflow. The PR check builds the JAR and verifies startup on the minimum and current stable JOSM versions.
+The output is `build/orbilume.jar`. Place it in the plugins directory of a separate JOSM profile when checking changes. Open **Imagery → Orbilume** and verify the affected search, preview, or layer workflow. CI builds the JAR, verifies imagery behavior with offline fixtures, and checks startup on the minimum and current stable JOSM versions.
 
 ## Open a pull request
 

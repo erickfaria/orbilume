@@ -467,6 +467,7 @@ final class EarthRaster {
             conn.setInstanceFollowRedirects(false);
             conn.setConnectTimeout(8000);
             conn.setReadTimeout(12000);
+            conn.setRequestProperty("User-Agent", Copernicus.USER_AGENT);
             conn.setRequestProperty("Range", "bytes=" + start + "-" + (start + BLOCK - 1));
             if (etag != null) {
                 conn.setRequestProperty("If-Match", etag);
