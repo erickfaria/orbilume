@@ -4,6 +4,8 @@
 
 Use **Imagery → Orbilume**. The area of interest can come from the viewport, a selection's bounding rectangle, or a pasted bounding box. Use decimal degrees in west, south, east, north order, with commas between values. Dates use `YYYY-MM-DD`.
 
+![Orbilume search dialog with area, dates, scene cloud limit, provider, and composition settings](images/orbilume-search.png)
+
 | Composition | Red, green, blue channels | Use |
 | --- | --- | --- |
 | Natural color | B04, B03, B02 | Visual context and interpretation |
